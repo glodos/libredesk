@@ -35,9 +35,11 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 	for _, cfg := range configs {
 		var auth smtp.Auth
 
-		// Use explicit SMTP credentials when a password is configured.
-		// This allows IMAP to use OAuth while SMTP uses separate username/password.
-		if cfg.Password == "" && oauth != nil && oauth.AccessToken != "" {
+		// SMTP auth is independent from IMAP OAuth.
+		// Explicit "none" disables SMTP AUTH even when the inbox uses OAuth.
+		if cfg.AuthProtocol == "none" {
+			auth = nil
+		} else if cfg.Password == "" && oauth != nil && oauth.AccessToken != "" {
 			auth = &XOAuth2SMTPAuth{
 				Username: cfg.Username,
 				Token:    oauth.AccessToken,
