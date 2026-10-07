@@ -329,6 +329,29 @@
         </FormItem>
       </FormField>
 
+      <FormField v-slot="{ componentField }" name="smtp.username">
+        <FormItem>
+          <FormLabel>{{ $t('globals.terms.username') }}</FormLabel>
+          <FormControl>
+            <Input type="text" placeholder="SMTP username" v-bind="componentField" />
+          </FormControl>
+          <FormDescription>
+            Leave the password empty to use OAuth. Set username and password to use separate SMTP credentials.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
+      <FormField v-slot="{ componentField }" name="smtp.password">
+        <FormItem>
+          <FormLabel>{{ $t('globals.terms.password') }}</FormLabel>
+          <FormControl>
+            <Input type="password" placeholder="SMTP password" v-bind="componentField" />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
       <FormField v-slot="{ componentField }" name="smtp.tls_type">
         <FormItem>
           <FormLabel>{{ t('globals.terms.tls') }}</FormLabel>
