@@ -773,6 +773,23 @@
           <label class="text-sm font-medium">{{ $t('globals.terms.tenantID') }}</label>
           <Input v-model="oauthCredentials.tenant_id" :disabled="isSubmittingOAuth" />
         </div>
+
+        <div
+          v-if="selectedProvider === PROVIDER_MICROSOFT && flowType === 'new_inbox'"
+          class="space-y-2"
+        >
+          <label class="text-sm font-medium">Shared mailbox</label>
+          <Input
+            v-model="oauthCredentials.mailbox_email"
+            type="email"
+            placeholder="support@example.com"
+            :disabled="isSubmittingOAuth"
+          />
+          <p class="text-xs text-muted-foreground">
+            Optional. Leave empty for a normal Microsoft 365 mailbox. For a shared mailbox, sign in
+            with a licensed user that has Full Access and Send As permissions.
+          </p>
+        </div>
       </div>
 
       <DialogFooter>
@@ -873,7 +890,8 @@ const flowType = ref('new_inbox') // "new_inbox" or "reconnect"
 const oauthCredentials = ref({
   client_id: '',
   client_secret: '',
-  tenant_id: ''
+  tenant_id: '',
+  mailbox_email: ''
 })
 const isSubmittingOAuth = ref(false)
 
@@ -985,6 +1003,8 @@ const reconnectOAuth = () => {
   oauthCredentials.value.client_id = clientId || ''
   oauthCredentials.value.client_secret = '' // Always require user to re-enter secret
   oauthCredentials.value.tenant_id = tenantId || ''
+  oauthCredentials.value.mailbox_email =
+    provider === PROVIDER_MICROSOFT ? props.initialValues?.from || '' : ''
 
   // Show modal for user to edit credentials
   showOAuthModal.value = true
