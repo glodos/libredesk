@@ -352,6 +352,27 @@
         </FormItem>
       </FormField>
 
+      <FormField v-slot="{ componentField }" name="smtp.auth_protocol">
+        <FormItem>
+          <FormLabel>{{ $t('admin.inbox.authProtocol') }}</FormLabel>
+          <FormControl>
+            <Select v-bind="componentField">
+              <SelectTrigger>
+                <SelectValue :placeholder="t('placeholders.selectProtocol')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="login">{{ $t('admin.inbox.authProtocol.login') }}</SelectItem>
+                <SelectItem value="cram">CRAM</SelectItem>
+                <SelectItem value="plain">{{ $t('admin.inbox.authProtocol.plain') }}</SelectItem>
+                <SelectItem value="none">{{ $t('globals.terms.none') }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormControl>
+          <FormDescription>{{ $t('admin.inbox.authProtocol.description') }}</FormDescription>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
       <FormField v-slot="{ componentField }" name="smtp.tls_type">
         <FormItem>
           <FormLabel>{{ t('globals.terms.tls') }}</FormLabel>
