@@ -1,17 +1,23 @@
+FROM golang:1.25-alpine AS builder
+
+RUN apk --no-cache add make git nodejs npm grep
+RUN npm install -g pnpm@9.15.3
+
+WORKDIR /src
+COPY . .
+
+# Build frontend, backend, and embed static assets into the single LibreDesk binary.
+RUN make build
+
 FROM alpine:3.18
 
-# Install necessary packages
 RUN apk --no-cache add ca-certificates tzdata
 
-# Set the working directory to /libredesk
 WORKDIR /libredesk
 
-# Copy necessary files
-COPY libredesk .
+COPY --from=builder /src/libredesk .
 COPY config.sample.toml config.toml
 
-# Expose port 9000 for the application
 EXPOSE 9000
 
-# Set the default command to run the libredesk binary
 CMD ["./libredesk"]
