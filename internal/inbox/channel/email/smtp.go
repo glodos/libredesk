@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"math/rand"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strings"
@@ -107,6 +108,35 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 	return pools, nil
 }
 
+// normalizeSMTPAddress formats mailbox addresses in the stricter form
+// expected by SMTP relays such as Resend. A mailbox without a display name is
+// emitted as email@example.com, not <email@example.com>.
+func normalizeSMTPAddress(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	addr, err := mail.ParseAddress(raw)
+	if err != nil {
+		return raw
+	}
+	if strings.TrimSpace(addr.Name) == "" {
+		return addr.Address
+	}
+	return addr.String()
+}
+
+func normalizeSMTPAddresses(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = normalizeSMTPAddress(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
 // Send sends an email using one of the configured SMTP servers.
 func (e *Email) Send(m models.OutboundMessage) error {
 	// Refresh OAuth token if needed
@@ -153,10 +183,10 @@ func (e *Email) Send(m models.OutboundMessage) error {
 	}
 
 	email := smtppool.Email{
-		From:        m.From,
-		To:          m.To,
-		Cc:          m.CC,
-		Bcc:         m.BCC,
+		From:        normalizeSMTPAddress(m.From),
+		To:          normalizeSMTPAddresses(m.To),
+		Cc:          normalizeSMTPAddresses(m.CC),
+		Bcc:         normalizeSMTPAddresses(m.BCC),
 		Subject:     m.Subject,
 		Attachments: attachments,
 		Headers:     textproto.MIMEHeader{},
