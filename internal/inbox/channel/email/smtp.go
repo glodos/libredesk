@@ -192,6 +192,20 @@ func (e *Email) Send(m models.OutboundMessage) error {
 		Headers:     textproto.MIMEHeader{},
 	}
 
+	// smtppool formats addresses through mail.Address.String(), which turns a
+	// nameless mailbox into <email@example.com>. Some SMTP relays (notably
+	// Resend-backed gateways) reject that form. Explicit headers bypass that
+	// reformatting while the To/Cc/Bcc slices are still used for the SMTP envelope.
+	if len(email.To) > 0 {
+		email.Headers.Set("To", strings.Join(email.To, ", "))
+	}
+	if len(email.Cc) > 0 {
+		email.Headers.Set("Cc", strings.Join(email.Cc, ", "))
+	}
+	if email.From != "" {
+		email.Headers.Set("From", email.From)
+	}
+
 	// Set libredesk loop prevention header to from address.
 	emailAddress, err := stringutil.ExtractEmail(m.From)
 	if err != nil {
