@@ -11,8 +11,10 @@ import { CONVERSATION_DEFAULT_STATUSES, MACRO_CONTEXT } from '@main/constants/co
 import { MACROS_COMMAND, useCommandPalette } from './useCommandPalette'
 import { SNOOZE_COMMAND } from './providers/useConversationCommands'
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const isMod = (event) => event.ctrlKey || event.metaKey
 const onlyAlt = (event) => event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+const macCommandShift = (event) => isMac && event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey
 const dialogIsOpen = () => Boolean(document.querySelector('[role="dialog"][data-state="open"]'))
 
 // Alt combos work while typing in the editor, so no shortcut depends on where focus is.
@@ -89,8 +91,9 @@ export function useGlobalShortcuts() {
     return true
   }
 
-  // Keyed by event.code: on macOS Option+letter changes event.key to a symbol.
-  const altKeys = {
+  // Keyed by event.code so shortcuts are layout-independent.
+  // macOS uses Command+Shift to keep Option free for diacritic input.
+  const conversationKeys = {
     KeyJ: stepConversation(-1),
     KeyK: stepConversation(1),
     KeyZ: openGroup(SNOOZE_COMMAND, perms.CONVERSATIONS_UPDATE_STATUS),
@@ -115,8 +118,12 @@ export function useGlobalShortcuts() {
       else if (event.shiftKey) handled = false
       else if (key === 'k') handled = (palette.togglePalette(), true)
       else if (key === 'm') handled = openMacros()
-    } else if (onlyAlt(event) && altKeys[event.code] && !dialogIsOpen()) {
-      handled = altKeys[event.code]()
+    } else if (
+      ((isMac && macCommandShift(event)) || (!isMac && onlyAlt(event))) &&
+      conversationKeys[event.code] &&
+      !dialogIsOpen()
+    ) {
+      handled = conversationKeys[event.code]()
     }
     if (handled) event.preventDefault()
   }

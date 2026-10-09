@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"math/rand"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strings"
@@ -35,8 +36,11 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 	for _, cfg := range configs {
 		var auth smtp.Auth
 
-		// Check if OAuth authentication should be used
-		if oauth != nil && oauth.AccessToken != "" {
+		// SMTP auth is independent from IMAP OAuth.
+		// Explicit "none" disables SMTP AUTH even when the inbox uses OAuth.
+		if cfg.AuthProtocol == "none" {
+			auth = nil
+		} else if cfg.Password == "" && oauth != nil && oauth.AccessToken != "" {
 			auth = &XOAuth2SMTPAuth{
 				Username: cfg.Username,
 				Token:    oauth.AccessToken,
@@ -104,6 +108,35 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 	return pools, nil
 }
 
+// normalizeSMTPAddress formats mailbox addresses in the stricter form
+// expected by SMTP relays such as Resend. A mailbox without a display name is
+// emitted as email@example.com, not <email@example.com>.
+func normalizeSMTPAddress(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	addr, err := mail.ParseAddress(raw)
+	if err != nil {
+		return raw
+	}
+	if strings.TrimSpace(addr.Name) == "" {
+		return addr.Address
+	}
+	return addr.String()
+}
+
+func normalizeSMTPAddresses(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = normalizeSMTPAddress(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
 // Send sends an email using one of the configured SMTP servers.
 func (e *Email) Send(m models.OutboundMessage) error {
 	// Refresh OAuth token if needed
@@ -150,13 +183,27 @@ func (e *Email) Send(m models.OutboundMessage) error {
 	}
 
 	email := smtppool.Email{
-		From:        m.From,
-		To:          m.To,
-		Cc:          m.CC,
-		Bcc:         m.BCC,
+		From:        normalizeSMTPAddress(m.From),
+		To:          normalizeSMTPAddresses(m.To),
+		Cc:          normalizeSMTPAddresses(m.CC),
+		Bcc:         normalizeSMTPAddresses(m.BCC),
 		Subject:     m.Subject,
 		Attachments: attachments,
 		Headers:     textproto.MIMEHeader{},
+	}
+
+	// smtppool formats addresses through mail.Address.String(), which turns a
+	// nameless mailbox into <email@example.com>. Some SMTP relays (notably
+	// Resend-backed gateways) reject that form. Explicit headers bypass that
+	// reformatting while the To/Cc/Bcc slices are still used for the SMTP envelope.
+	if len(email.To) > 0 {
+		email.Headers.Set("To", strings.Join(email.To, ", "))
+	}
+	if len(email.Cc) > 0 {
+		email.Headers.Set("Cc", strings.Join(email.Cc, ", "))
+	}
+	if email.From != "" {
+		email.Headers.Set("From", email.From)
 	}
 
 	// Set libredesk loop prevention header to from address.
