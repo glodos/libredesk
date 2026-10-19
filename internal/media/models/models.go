@@ -59,14 +59,31 @@ func NormalizeContentType(contentType string) string {
 	return mediaType
 }
 
-// ContentDisposition returns inline for images, video and PDF. XML types such as SVG can run scripts and are always attachments.
+// ContentDisposition returns inline for media and safe browser-readable text.
+// Potentially active document types (HTML, XML/SVG, JavaScript) and unknown/binary
+// content remain attachments.
 func ContentDisposition(contentType string) string {
 	contentType = NormalizeContentType(contentType)
-	if strings.HasSuffix(contentType, "+xml") {
+
+	if strings.HasSuffix(contentType, "+xml") ||
+		contentType == "text/html" ||
+		contentType == "application/xhtml+xml" ||
+		contentType == "application/xml" ||
+		contentType == "text/xml" ||
+		contentType == "application/javascript" ||
+		contentType == "text/javascript" {
 		return DispositionAttachment
 	}
-	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") || contentType == ContentTypePDF {
+
+	if strings.HasPrefix(contentType, "image/") ||
+		strings.HasPrefix(contentType, "video/") ||
+		strings.HasPrefix(contentType, "audio/") ||
+		strings.HasPrefix(contentType, "text/") ||
+		contentType == ContentTypePDF ||
+		contentType == "application/json" ||
+		strings.HasSuffix(contentType, "+json") {
 		return DispositionInline
 	}
+
 	return DispositionAttachment
 }
