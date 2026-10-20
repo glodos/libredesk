@@ -329,6 +329,50 @@
         </FormItem>
       </FormField>
 
+      <FormField v-slot="{ componentField }" name="smtp.username">
+        <FormItem>
+          <FormLabel>{{ $t('globals.terms.username') }}</FormLabel>
+          <FormControl>
+            <Input type="text" placeholder="SMTP username" v-bind="componentField" />
+          </FormControl>
+          <FormDescription>
+            Leave the password empty to use OAuth. Set username and password to use separate SMTP credentials.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
+      <FormField v-slot="{ componentField }" name="smtp.password">
+        <FormItem>
+          <FormLabel>{{ $t('globals.terms.password') }}</FormLabel>
+          <FormControl>
+            <Input type="password" placeholder="SMTP password" v-bind="componentField" />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
+      <FormField v-slot="{ componentField }" name="smtp.auth_protocol">
+        <FormItem>
+          <FormLabel>{{ $t('admin.inbox.authProtocol') }}</FormLabel>
+          <FormControl>
+            <Select v-bind="componentField">
+              <SelectTrigger>
+                <SelectValue :placeholder="t('placeholders.selectProtocol')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="login">{{ $t('admin.inbox.authProtocol.login') }}</SelectItem>
+                <SelectItem value="cram">CRAM</SelectItem>
+                <SelectItem value="plain">{{ $t('admin.inbox.authProtocol.plain') }}</SelectItem>
+                <SelectItem value="none">{{ $t('globals.terms.none') }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormControl>
+          <FormDescription>{{ $t('admin.inbox.authProtocol.description') }}</FormDescription>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+
       <FormField v-slot="{ componentField }" name="smtp.tls_type">
         <FormItem>
           <FormLabel>{{ t('globals.terms.tls') }}</FormLabel>
@@ -773,6 +817,23 @@
           <label class="text-sm font-medium">{{ $t('globals.terms.tenantID') }}</label>
           <Input v-model="oauthCredentials.tenant_id" :disabled="isSubmittingOAuth" />
         </div>
+
+        <div
+          v-if="selectedProvider === PROVIDER_MICROSOFT && flowType === 'new_inbox'"
+          class="space-y-2"
+        >
+          <label class="text-sm font-medium">Shared mailbox</label>
+          <Input
+            v-model="oauthCredentials.mailbox_email"
+            type="email"
+            placeholder="support@example.com"
+            :disabled="isSubmittingOAuth"
+          />
+          <p class="text-xs text-muted-foreground">
+            Optional. Leave empty for a normal Microsoft 365 mailbox. For a shared mailbox, sign in
+            with a licensed user that has Full Access and Send As permissions.
+          </p>
+        </div>
       </div>
 
       <DialogFooter>
@@ -873,7 +934,8 @@ const flowType = ref('new_inbox') // "new_inbox" or "reconnect"
 const oauthCredentials = ref({
   client_id: '',
   client_secret: '',
-  tenant_id: ''
+  tenant_id: '',
+  mailbox_email: ''
 })
 const isSubmittingOAuth = ref(false)
 
@@ -985,6 +1047,8 @@ const reconnectOAuth = () => {
   oauthCredentials.value.client_id = clientId || ''
   oauthCredentials.value.client_secret = '' // Always require user to re-enter secret
   oauthCredentials.value.tenant_id = tenantId || ''
+  oauthCredentials.value.mailbox_email =
+    provider === PROVIDER_MICROSOFT ? props.initialValues?.from || '' : ''
 
   // Show modal for user to edit credentials
   showOAuthModal.value = true

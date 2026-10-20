@@ -50,7 +50,7 @@ const { t } = useI18n()
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const mod = isMac ? '⌘' : 'Ctrl'
-const alt = isMac ? '⌥' : 'Alt'
+const conversationMod = isMac ? ['⌘', '⇧'] : ['Alt']
 
 const groups = computed(() => [
   {
@@ -58,22 +58,22 @@ const groups = computed(() => [
     items: [
       { label: t('shortcuts.openCommandBar'), keys: [mod, 'K'] },
       { label: t('navigation.keyboardShortcuts'), keys: [mod, '/'] },
-      { label: t('conversation.newConversation'), keys: [alt, 'C'] }
+      { label: t('conversation.newConversation'), keys: [...conversationMod, 'C'] }
     ]
   },
   {
     title: t('globals.terms.conversation', 2),
     items: [
-      { label: t('shortcuts.previousConversation'), keys: [alt, 'J'] },
-      { label: t('shortcuts.nextConversation'), keys: [alt, 'K'] },
-      { label: t('globals.terms.snooze'), keys: [alt, 'Z'] },
-      { label: t('actions.setPriority'), keys: [alt, 'P'] },
-      { label: t('actions.assignAgent'), keys: [alt, 'A'] },
-      { label: t('command.switchToReply'), keys: [alt, 'R'] },
-      { label: t('command.switchToPrivateNote'), keys: [alt, 'N'] },
-      { label: t('conversation.bulkActions.selectConversation'), keys: [alt, 'X'] },
-      { label: t('globals.terms.resolve'), keys: [alt, 'E'] },
-      { label: t('globals.terms.reopen'), keys: [alt, 'O'] }
+      { label: t('shortcuts.previousConversation'), keys: [...conversationMod, 'J'] },
+      { label: t('shortcuts.nextConversation'), keys: [...conversationMod, 'K'] },
+      { label: t('globals.terms.snooze'), keys: [...conversationMod, 'Z'] },
+      { label: t('actions.setPriority'), keys: [...conversationMod, 'P'] },
+      { label: t('actions.assignAgent'), keys: [...conversationMod, 'A'] },
+      { label: t('command.switchToReply'), keys: [...conversationMod, 'R'] },
+      { label: t('command.switchToPrivateNote'), keys: [...conversationMod, 'N'] },
+      { label: t('conversation.bulkActions.selectConversation'), keys: [...conversationMod, 'X'] },
+      { label: t('globals.terms.resolve'), keys: [...conversationMod, 'E'] },
+      { label: t('globals.terms.reopen'), keys: [...conversationMod, 'O'] }
     ]
   },
   {
@@ -81,7 +81,7 @@ const groups = computed(() => [
     items: [
       { label: t('actions.openMacros'), keys: [mod, 'M'] },
       { label: t('shortcuts.toggleReplyType'), keys: [mod, 'P'] },
-      { label: t('shortcuts.minimizeReplyBox'), keys: [alt, 'M'] },
+      { label: t('shortcuts.minimizeReplyBox'), keys: [...conversationMod, 'M'] },
       { label: t('actions.sendReply'), keys: ['Ctrl', 'Enter'] },
       { label: t('globals.terms.bold'), keys: [mod, 'B'] },
       { label: t('globals.terms.italic'), keys: [mod, 'I'] }

@@ -28,9 +28,10 @@ const (
 type OAuthCredentialsRequest struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
-	TenantID     string `json:"tenant_id,omitempty"` // Optional for Microsoft
-	FlowType     string `json:"flow_type,omitempty"` // "new_inbox" or "reconnect"
-	InboxID      int    `json:"inbox_id,omitempty"`  // Required for reconnect flow
+	TenantID     string `json:"tenant_id,omitempty"`     // Optional for Microsoft
+	MailboxEmail string `json:"mailbox_email,omitempty"` // Optional shared mailbox address for Microsoft
+	FlowType     string `json:"flow_type,omitempty"`     // "new_inbox" or "reconnect"
+	InboxID      int    `json:"inbox_id,omitempty"`      // Required for reconnect flow
 }
 
 // handleOAuthAuthorize initiates the OAuth authorization flow for creating a new email inbox.
@@ -82,9 +83,14 @@ func handleOAuthAuthorize(r *fastglue.Request) error {
 		"inbox_id":      req.InboxID,
 	}
 
-	// Add tenant ID for Microsoft if provided
-	if provider == string(oauth.ProviderMicrosoft) && req.TenantID != "" {
-		oauthData["tenant_id"] = req.TenantID
+	// Add Microsoft-specific values if provided.
+	if provider == string(oauth.ProviderMicrosoft) {
+		if req.TenantID != "" {
+			oauthData["tenant_id"] = req.TenantID
+		}
+		if mailboxEmail := strings.TrimSpace(req.MailboxEmail); mailboxEmail != "" {
+			oauthData["mailbox_email"] = mailboxEmail
+		}
 	}
 
 	if err := app.redis.HSet(ctx, redisKey, oauthData).Err(); err != nil {
@@ -152,9 +158,10 @@ func handleOAuthCallback(r *fastglue.Request) error {
 	redirectURI := oauthData["redirect_uri"]
 	clientID := oauthData["client_id"]
 	clientSecret := oauthData["client_secret"]
-	tenantID := oauthData["tenant_id"]  // Empty string if not set
-	flowType := oauthData["flow_type"]  // "new_inbox" or "reconnect"
-	inboxIDStr := oauthData["inbox_id"] // Inbox ID for reconnect flow
+	tenantID := oauthData["tenant_id"]          // Empty string if not set
+	mailboxEmail := oauthData["mailbox_email"]  // Optional shared mailbox address
+	flowType := oauthData["flow_type"]          // "new_inbox" or "reconnect"
+	inboxIDStr := oauthData["inbox_id"]         // Inbox ID for reconnect flow
 
 	// Validate provider matches URL parameter
 	if storedProvider != provider {
@@ -195,12 +202,24 @@ func handleOAuthCallback(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, app.i18n.Ts("globals.messages.somethingWentWrong"), nil, envelope.GeneralError)
 	}
 
-	// Extract email address for comparison (handles "Name <email>" format)
+	// Extract the OAuth account email for comparison (handles "Name <email>" format).
 	userEmailAddr, err := stringutil.ExtractEmail(userEmail)
 	if err != nil {
 		app.lo.Error("error extracting email address", "email", userEmail, "error", err)
-		// Fallback
 		userEmailAddr = userEmail
+	}
+
+	// Microsoft OAuth can authorize as a licensed user while accessing a shared
+	// mailbox. In that case the shared mailbox address must be used as the
+	// XOAUTH2 username for IMAP/SMTP, while the token still belongs to userEmail.
+	inboxEmailAddr := userEmailAddr
+	if provider == string(oauth.ProviderMicrosoft) && strings.TrimSpace(mailboxEmail) != "" {
+		parsedMailboxEmail, err := stringutil.ExtractEmail(strings.TrimSpace(mailboxEmail))
+		if err != nil || parsedMailboxEmail == "" {
+			app.lo.Error("invalid shared mailbox email", "email", mailboxEmail, "error", err)
+			return r.Redirect("/admin/inboxes?error=invalid_mailbox_email", fasthttp.StatusFound, nil, "")
+		}
+		inboxEmailAddr = parsedMailboxEmail
 	}
 
 	var existingInbox *imodels.Inbox
@@ -210,7 +229,7 @@ func handleOAuthCallback(r *fastglue.Request) error {
 			existingEmailAddr = existing.From
 		}
 
-		if existingEmailAddr == userEmailAddr {
+		if existingEmailAddr == inboxEmailAddr {
 			existingInbox = &existingInboxes[i]
 			break
 		}
@@ -219,7 +238,7 @@ func handleOAuthCallback(r *fastglue.Request) error {
 	// Validate flow type matches actual state
 	// New inbox flow: reject if inbox already exists
 	if flowType == FlowTypeNewInbox && existingInbox != nil {
-		app.lo.Error("Inbox already exists for email", "email", userEmail)
+		app.lo.Error("Inbox already exists for email", "email", inboxEmailAddr)
 		return r.Redirect("/admin/inboxes?error=inbox_already_exists", fasthttp.StatusFound, nil, "")
 	}
 
@@ -239,10 +258,11 @@ func handleOAuthCallback(r *fastglue.Request) error {
 			return r.Redirect("/admin/inboxes?error=inbox_not_found", fasthttp.StatusFound, nil, "")
 		}
 
-		// Verify the authorized email matches the target inbox's email
+		// Verify the target mailbox matches the requested mailbox identity. For a
+		// Microsoft shared mailbox this intentionally differs from the OAuth user.
 		targetEmailAddr, _ := stringutil.ExtractEmail(targetInbox.From)
-		if targetEmailAddr != userEmailAddr {
-			app.lo.Error("Email mismatch during reconnect", "target_email", targetEmailAddr, "authorized_email", userEmailAddr)
+		if targetEmailAddr != inboxEmailAddr {
+			app.lo.Error("Email mismatch during reconnect", "target_email", targetEmailAddr, "mailbox_email", inboxEmailAddr, "authorized_email", userEmailAddr)
 			return r.Redirect("/admin/inboxes?error=email_mismatch", fasthttp.StatusFound, nil, "")
 		}
 
@@ -294,8 +314,9 @@ func handleOAuthCallback(r *fastglue.Request) error {
 		return r.Redirect("/admin/inboxes?success=oauth_reconnected", fasthttp.StatusFound, nil, "")
 	}
 
-	// Get provider-specific defaults
-	smtpConfig, imapConfig := getProviderDefaults(provider, userEmail)
+	// Get provider-specific defaults. For Microsoft shared mailboxes the
+	// mailbox address is the XOAUTH2 username, not the OAuth account address.
+	smtpConfig, imapConfig := getProviderDefaults(provider, inboxEmailAddr)
 
 	// Create OAuth config for tokens
 	oauthConfig := &imodels.OAuthConfig{
@@ -312,7 +333,7 @@ func handleOAuthCallback(r *fastglue.Request) error {
 	config := imodels.Config{
 		SMTP:                 []imodels.SMTPConfig{smtpConfig},
 		IMAP:                 []imodels.IMAPConfig{imapConfig},
-		From:                 userEmail,
+		From:                 inboxEmailAddr,
 		AuthType:             imodels.AuthTypeOAuth2,
 		OAuth:                oauthConfig,
 		EnablePlusAddressing: true,
@@ -326,8 +347,8 @@ func handleOAuthCallback(r *fastglue.Request) error {
 
 	// Create inbox
 	newInbox := imodels.Inbox{
-		Name:              fmt.Sprintf("%s Inbox", userEmail),
-		From:              userEmail,
+		Name:              fmt.Sprintf("%s Inbox", inboxEmailAddr),
+		From:              inboxEmailAddr,
 		Channel:           inbox.ChannelEmail,
 		Enabled:           true,
 		CSATEnabled:       false,
