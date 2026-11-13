@@ -453,14 +453,7 @@
               </FormField>
             </div>
 
-            <div
-              v-show="
-                !isOAuthInbox ||
-                form.errors.value['smtp.username'] ||
-                form.errors.value['smtp.password']
-              "
-              class="grid gap-4 sm:grid-cols-2"
-            >
+            <div class="grid gap-4 sm:grid-cols-2">
               <FormField v-slot="{ componentField, handleChange, meta }" name="smtp.username">
                 <FormItem>
                   <FormLabel>{{ $t('globals.terms.username') }}</FormLabel>
@@ -594,7 +587,7 @@
                       v-slot="{ componentField, handleChange, meta }"
                       name="smtp.auth_protocol"
                     >
-                      <FormItem v-show="!isOAuthInbox || form.errors.value['smtp.auth_protocol']">
+                      <FormItem>
                         <FormLabel>{{ $t('admin.inbox.authProtocol') }}</FormLabel>
                         <FormControl>
                           <Select
@@ -874,6 +867,24 @@
             :disabled="isSubmittingOAuth"
           />
         </div>
+
+        <div
+          v-if="selectedProvider === PROVIDER_MICROSOFT && flowType === 'new_inbox'"
+          class="space-y-2"
+        >
+          <Label for="oauth-mailbox_email">Shared mailbox</Label>
+          <Input
+            id="oauth-mailbox_email"
+            v-model="oauthCredentials.mailbox_email"
+            type="email"
+            placeholder="support@example.com"
+            :disabled="isSubmittingOAuth"
+          />
+          <p class="text-xs text-muted-foreground">
+            Optional. Leave empty for a normal Microsoft 365 mailbox. For a shared mailbox, sign in
+            with a licensed user that has Full Access and Send As permissions.
+          </p>
+        </div>
       </div>
 
       <DialogFooter>
@@ -1053,7 +1064,8 @@ const flowType = ref('new_inbox')
 const oauthCredentials = ref({
   client_id: '',
   client_secret: '',
-  tenant_id: ''
+  tenant_id: '',
+  mailbox_email: ''
 })
 const isSubmittingOAuth = ref(false)
 
@@ -1230,6 +1242,8 @@ const reconnectOAuth = () => {
   oauthCredentials.value.client_id = clientId || ''
   oauthCredentials.value.client_secret = ''
   oauthCredentials.value.tenant_id = tenantId || ''
+  oauthCredentials.value.mailbox_email =
+    provider === PROVIDER_MICROSOFT ? props.initialValues?.from || '' : ''
 
   showOAuthModal.value = true
 }
