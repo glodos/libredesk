@@ -30,6 +30,7 @@ func IsPublicModel(modelType string) bool {
 
 // Media represents an uploaded object in DB and storage backend.
 type Media struct {
+	UploadedBy  null.Int        `db:"uploaded_by" json:"-"`
 	ID          int             `db:"id" json:"id"`
 	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time       `db:"updated_at" json:"updated_at"`
@@ -50,6 +51,11 @@ type Media struct {
 	Content []byte `json:"-"`
 }
 
+// UploadedByUser reports whether the given user uploaded this media.
+func (m Media) UploadedByUser(userID int) bool {
+	return m.UploadedBy.Valid && m.UploadedBy.Int == userID
+}
+
 // NormalizeContentType returns the lowercased type/subtype of a Content-Type value, or application/octet-stream if it does not parse.
 func NormalizeContentType(contentType string) string {
 	mediaType, _, err := mime.ParseMediaType(contentType)
@@ -59,14 +65,31 @@ func NormalizeContentType(contentType string) string {
 	return mediaType
 }
 
-// ContentDisposition returns inline for images, video and PDF. XML types such as SVG can run scripts and are always attachments.
+// ContentDisposition returns inline for media and safe browser-readable text.
+// Potentially active document types (HTML, XML/SVG, JavaScript) and unknown/binary
+// content remain attachments.
 func ContentDisposition(contentType string) string {
 	contentType = NormalizeContentType(contentType)
-	if strings.HasSuffix(contentType, "+xml") {
+
+	if strings.HasSuffix(contentType, "+xml") ||
+		contentType == "text/html" ||
+		contentType == "application/xhtml+xml" ||
+		contentType == "application/xml" ||
+		contentType == "text/xml" ||
+		contentType == "application/javascript" ||
+		contentType == "text/javascript" {
 		return DispositionAttachment
 	}
-	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") || contentType == ContentTypePDF {
+
+	if strings.HasPrefix(contentType, "image/") ||
+		strings.HasPrefix(contentType, "video/") ||
+		strings.HasPrefix(contentType, "audio/") ||
+		strings.HasPrefix(contentType, "text/") ||
+		contentType == ContentTypePDF ||
+		contentType == "application/json" ||
+		strings.HasSuffix(contentType, "+json") {
 		return DispositionInline
 	}
+
 	return DispositionAttachment
 }

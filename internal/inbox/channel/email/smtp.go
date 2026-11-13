@@ -1,9 +1,11 @@
 package email
 
 import (
+	"cmp"
 	"crypto/tls"
 	"fmt"
 	"math/rand"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strings"
@@ -12,7 +14,7 @@ import (
 	"github.com/abhinavxd/libredesk/internal/conversation/models"
 	imodels "github.com/abhinavxd/libredesk/internal/inbox/models"
 	"github.com/abhinavxd/libredesk/internal/stringutil"
-	"github.com/knadh/smtppool"
+	"github.com/knadh/smtppool/v2"
 )
 
 const (
@@ -21,6 +23,7 @@ const (
 	headerReferences              = "References"
 	headerInReplyTo               = "In-Reply-To"
 	headerLibredeskLoopPrevention = "X-Libredesk-Loop-Prevention"
+	headerAliasVerification       = "X-Libredesk-Alias-Verification"
 	headerLibredeskConversationID = "X-Libredesk-Conversation-UUID"
 	headerAutoreply               = "X-Autoreply"
 	headerAutoSubmitted           = "Auto-Submitted"
@@ -35,14 +38,16 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 	for _, cfg := range configs {
 		var auth smtp.Auth
 
-		// Check if OAuth authentication should be used
-		if oauth != nil && oauth.AccessToken != "" {
+		// SMTP authentication is independent from IMAP OAuth.
+		// Explicit "none" disables SMTP AUTH even when the inbox uses OAuth.
+		if cfg.AuthProtocol == "none" {
+			auth = nil
+		} else if cfg.Password == "" && oauth != nil && oauth.AccessToken != "" {
 			auth = &XOAuth2SMTPAuth{
 				Username: cfg.Username,
 				Token:    oauth.AccessToken,
 			}
 		} else {
-			// Use traditional authentication methods
 			switch cfg.AuthProtocol {
 			case "cram":
 				auth = smtp.CRAMMD5Auth(cfg.Username, cfg.Password)
@@ -83,15 +88,27 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 			poolWaitTimeout = 40 * time.Second
 		}
 
+		ssl := smtppool.SSLNone
+		if cfg.TLSConfig != nil {
+			ssl = smtppool.SSLSTARTTLS
+			if cfg.SSL {
+				ssl = smtppool.SSLTLS
+			}
+		}
+		maxMessageRetries := cfg.MaxMessageRetries
+		if maxMessageRetries == 0 {
+			maxMessageRetries = 2
+		}
+
 		pool, err := smtppool.New(smtppool.Opt{
 			Host:              cfg.Host,
 			Port:              cfg.Port,
 			HelloHostname:     cfg.HelloHostname,
 			MaxConns:          cfg.MaxConns,
-			MaxMessageRetries: cfg.MaxMessageRetries,
+			MaxMessageRetries: maxMessageRetries,
 			IdleTimeout:       idleTimeout,
 			PoolWaitTimeout:   poolWaitTimeout,
-			SSL:               cfg.SSL,
+			SSL:               ssl,
 			Auth:              cfg.Auth,
 			TLSConfig:         cfg.TLSConfig,
 		})
@@ -102,6 +119,35 @@ func NewSmtpPool(configs []imodels.SMTPConfig, oauth *imodels.OAuthConfig) ([]*s
 	}
 
 	return pools, nil
+}
+
+// normalizeSMTPAddress formats mailbox addresses in the stricter form
+// expected by SMTP relays such as Resend. A mailbox without a display name is
+// emitted as email@example.com, not <email@example.com>.
+func normalizeSMTPAddress(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	addr, err := mail.ParseAddress(raw)
+	if err != nil {
+		return raw
+	}
+	if strings.TrimSpace(addr.Name) == "" {
+		return addr.Address
+	}
+	return addr.String()
+}
+
+func normalizeSMTPAddresses(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = normalizeSMTPAddress(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // Send sends an email using one of the configured SMTP servers.
@@ -150,24 +196,50 @@ func (e *Email) Send(m models.OutboundMessage) error {
 	}
 
 	email := smtppool.Email{
-		From:        m.From,
-		To:          m.To,
-		Cc:          m.CC,
-		Bcc:         m.BCC,
-		Subject:     m.Subject,
+		From:        normalizeSMTPAddress(m.From),
+		To:          normalizeSMTPAddresses(m.To),
+		Cc:          normalizeSMTPAddresses(m.CC),
+		Bcc:         normalizeSMTPAddresses(m.BCC),
+		Subject:     strings.Join(strings.Fields(m.Subject), " "),
 		Attachments: attachments,
 		Headers:     textproto.MIMEHeader{},
 	}
 
-	// Set libredesk loop prevention header to from address.
+	// smtppool formats addresses through mail.Address.String(), which turns a
+	// nameless mailbox into <email@example.com>. Some SMTP relays (notably
+	// Resend-backed gateways) reject that form. Explicit headers bypass that
+	// reformatting while the To/Cc/Bcc slices are still used for the SMTP envelope.
+	if len(email.To) > 0 {
+		email.Headers.Set("To", strings.Join(email.To, ", "))
+	}
+	if len(email.Cc) > 0 {
+		email.Headers.Set("Cc", strings.Join(email.Cc, ", "))
+	}
+	if email.From != "" {
+		email.Headers.Set("From", email.From)
+	}
+
 	emailAddress, err := stringutil.ExtractEmail(m.From)
 	if err != nil {
 		e.lo.Error("failed to extract email address from the 'from' header", "error", err)
 		return fmt.Errorf("failed to extract email address from 'From' header: %w", err)
 	}
-	email.Headers.Set(headerLibredeskLoopPrevention, emailAddress)
+	// Loop identity is the inbox UUID, shared by the primary address and all aliases.
+	email.Headers.Set(headerLibredeskLoopPrevention, e.uuid)
+	if m.AliasVerificationToken != "" {
+		email.Headers.Set(headerAliasVerification, m.AliasVerificationToken)
+	}
 
-	if rt := resolveReplyTo(m.ReplyTo, e.replyTo, emailAddress, m.ConversationUUID, e.enablePlusAddressing); rt != "" {
+	inboxReplyTo := e.replyTo
+	if !strings.EqualFold(emailAddress, e.PrimaryAddress()) {
+		if e.enablePlusAddressing {
+			// Alias forwarding may only match the exact address, excluding plus addressed variants.
+			inboxReplyTo = cmp.Or(inboxReplyTo, e.PrimaryAddress())
+		} else {
+			inboxReplyTo = ""
+		}
+	}
+	if rt := resolveReplyTo(m.ReplyTo, inboxReplyTo, emailAddress, m.ConversationUUID, e.enablePlusAddressing); rt != "" {
 		email.Headers.Set("Reply-To", rt)
 		e.lo.Debug("reply-to header set", "reply_to", rt)
 	}
@@ -206,7 +278,7 @@ func (e *Email) Send(m models.OutboundMessage) error {
 
 	// Set email content
 	switch m.ContentType {
-	case "plain":
+	case "plain", models.ContentTypeText:
 		email.Text = []byte(m.Content)
 	default:
 		email.HTML = []byte(m.Content)
@@ -222,6 +294,9 @@ func (e *Email) Send(m models.OutboundMessage) error {
 		serverCount = len(e.smtpPools)
 		server      *smtppool.Pool
 	)
+	if serverCount == 0 {
+		return fmt.Errorf("no SMTP servers configured for inbox %d", e.Identifier())
+	}
 	if serverCount > 1 {
 		server = e.smtpPools[rand.Intn(serverCount)]
 	} else {
