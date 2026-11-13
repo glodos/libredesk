@@ -1,7 +1,7 @@
 FROM golang:1.27-alpine AS builder
 
 RUN apk --no-cache add make git nodejs npm grep
-RUN npm install -g pnpm@9.15.3
+RUN npm install -g pnpm@11.28.8
 
 WORKDIR /src
 COPY . .
